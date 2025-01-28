@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
+import Image from 'next/image';
 
 const EXPO_ICON_SIZES = {
   'adaptive-icon.png': { width: 1024, height: 1024 },
@@ -8,7 +9,17 @@ const EXPO_ICON_SIZES = {
   'splash.png': { width: 1024, height: 1024 },
 };
 
-const DarkThemeImage = ({
+const DarkThemeImage = React.forwardRef<HTMLImageElement, {
+  imageUrl?: string;
+  alt?: string;
+  size?: number;
+  darkMode?: {
+    brightness: number;
+    contrast: number;
+    invert: number;
+  };
+  onImageLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
+}>(({
   imageUrl,
   alt = "icon",
   size = 64,
@@ -18,19 +29,20 @@ const DarkThemeImage = ({
     invert: 1,
   },
   onImageLoad
-}) => {
-  const getFilterStyle = (settings) => {
+}, ref) => {
+  const getFilterStyle = (settings: { brightness: number; contrast: number; invert: number }) => {
     const { brightness, contrast, invert } = settings;
     return `brightness(${brightness}) contrast(${contrast}) invert(${invert})`;
   };
 
   return (
-    <img
+    <Image
+      ref={ref as React.Ref<HTMLImageElement>}
       src={imageUrl || "/api/placeholder/64/64"}
       alt={alt}
+      width={size}
+      height={size}
       style={{
-        width: size,
-        height: size,
         transition: 'filter 0.3s ease',
         filter: getFilterStyle(darkMode)
       }}
@@ -38,7 +50,9 @@ const DarkThemeImage = ({
       onLoad={onImageLoad}
     />
   );
-};
+});
+
+DarkThemeImage.displayName = 'DarkThemeImage';
 
 const ImageIconDemo = () => {
   const [isDark, setIsDark] = useState(false);
@@ -50,12 +64,12 @@ const ImageIconDemo = () => {
   });
   const [originalSize, setOriginalSize] = useState({ width: 0, height: 0 });
   const [error, setError] = useState("");
-  const canvasRef = useRef(null);
-  const darkImageRef = useRef(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const darkImageRef = useRef<HTMLImageElement>(null);
   
   // 处理图片加载完成
-  const handleImageLoad = (e) => {
-    const img = e.target;
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.target as HTMLImageElement;
     setOriginalSize({
       width: img.naturalWidth,
       height: img.naturalHeight
@@ -63,31 +77,42 @@ const ImageIconDemo = () => {
   };
 
   // 处理图片上传
-  const handleImageUpload = (event) => {
-    const file = event.target.files[0];
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+    const file = files[0];
     if (file) {
-      const img = new Image();
-      img.onload = () => {
-        if (img.width < 1024 || img.height < 1024) {
-          setError("请上传至少 1024x1024 像素的图片");
-          setImageUrl("");
-          return;
-        }
-        setError("");
-        setOriginalSize({ width: img.width, height: img.height });
-        setImageUrl(URL.createObjectURL(file));
-      };
-      img.src = URL.createObjectURL(file);
+      const img = new window.Image();
+      await new Promise<void>((resolve) => {
+        img.onload = () => {
+          if (img.width < 1024 || img.height < 1024) {
+            setError("请上传至少 1024x1024 像素的图片");
+            setImageUrl("");
+          } else {
+            setError("");
+            setOriginalSize({ width: img.width, height: img.height });
+            setImageUrl(URL.createObjectURL(file));
+          }
+          resolve(undefined);
+        };
+        img.src = URL.createObjectURL(file);
+      });
     }
   };
 
   // 创建指定尺寸的图片
-  const createResizedImage = (sourceImage, targetWidth, targetHeight, darkMode = false) => {
-    return new Promise((resolve) => {
+  const createResizedImage = (
+    sourceImage: HTMLImageElement,
+    targetWidth: number,
+    targetHeight: number,
+    darkMode = false
+  ): Promise<Blob> => {
+    return new Promise((resolve: (blob: Blob) => void) => {
       const canvas = document.createElement('canvas');
       canvas.width = targetWidth;
       canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
       if (darkMode) {
         const { brightness, contrast, invert } = settings;
@@ -116,6 +141,7 @@ const ImageIconDemo = () => {
       ctx.drawImage(sourceImage, drawX, drawY, drawWidth, drawHeight);
 
       canvas.toBlob((blob) => {
+        if (!blob) return;
         resolve(blob);
       }, 'image/png');
     });
@@ -125,18 +151,25 @@ const ImageIconDemo = () => {
   const exportImage = async () => {
     if (!imageUrl || !darkImageRef.current) return;
 
-    const img = new Image();
+    const img = new window.Image();
     img.src = imageUrl;
-    await new Promise(resolve => { img.onload = resolve; });
+    await new Promise<void>((resolve) => {
+      img.onload = () => resolve();
+    });
 
     const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
     canvas.width = originalSize.width;
     canvas.height = originalSize.height;
     ctx.filter = darkImageRef.current.style.filter;
     ctx.drawImage(img, 0, 0, originalSize.width, originalSize.height);
     
     canvas.toBlob((blob) => {
+      if (!blob) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -152,9 +185,11 @@ const ImageIconDemo = () => {
   const exportExpoIcons = async () => {
     if (!imageUrl) return;
 
-    const img = new Image();
+    const img = new window.Image();
     img.src = imageUrl;
-    await new Promise(resolve => { img.onload = resolve; });
+    await new Promise<void>((resolve) => {
+      img.onload = () => resolve();
+    });
 
     // 创建 ZIP 文件
     const JSZip = (await import('jszip')).default;
